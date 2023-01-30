@@ -1,7 +1,7 @@
 import edu.cornell.cs.sam.io.SamTokenizer;
 import edu.cornell.cs.sam.io.Tokenizer.TokenType;
-import java.util.HashMap;
 
+import java.util.HashMap;
 import java.util.ArrayList;
 
 // TODO: make a `method` class so we don't have to keep 
@@ -21,8 +21,7 @@ public class BaliCompiler {
 		// returns SaM code for program in file
 		try {
 			t = new SamTokenizer(fileName);
-			String pgm = getProgram() + "STOP\n";
-			return pgm;
+			return getProgram();
 		} 
 		catch (Exception e) {
 			System.out.println(e.getMessage());
@@ -31,7 +30,16 @@ public class BaliCompiler {
 	}
 	
 	private String getProgram() {
-		String pgm = "";
+		// the program bootstraps by calling the `main()` method
+		// and will terminate after `main()` terminates
+		// below we set-up with a special version of `getMethodCall()`
+		MethodInfo mainMethodInfo = new MethodInfo();
+		mainMethodInfo.methodLabel = "main"; // it's the only static label
+		mainMethodInfo.numParameters = 0;
+		methodInfos.put("main", mainMethodInfo);
+
+		String pgm = "PUSHIMM 0\nLINK\nJSR main\nPOPFBR\nSTOP\n";
+
 		while (t.peekAtKind() != TokenType.EOF) {
 			pgm += getMethod();
 		}
@@ -39,7 +47,8 @@ public class BaliCompiler {
 	}
 
 	private String getMethod() {
-		BaliSymbolTable s = new BaliSymbolTable();
+		// `s` is a symbol table implemented with a Java HashMap
+		HashMap<String, Integer> s = new HashMap<String, Integer>();
 		
 		// the only type in Bali is `int`
 		assertAndConsume("int");
@@ -81,17 +90,24 @@ public class BaliCompiler {
 		// there can be multiple lines of declarations, and each
 		// line can have multiple variables declared
 		int offset = 2; // first local is at address `FBR + 2`
-		while (t.test("int")) {
+		String varID;
+		while (t.check("int")) {
 			// consume a line of variable declaration
-			while (t.check("int")) {
-				String varID = t.getWord();
+			while (true) {
+				varID = t.getWord();
+				// error out if the variable has already been defined
+				if (s.get(varID) != null) {
+					throw new Error("Error parsing a method's local variables: duplicate declaration of variable/parameter `"
+							+ varID + "` on line " + t.lineNo());
+				}
+
 				if (t.check('=')) {
-					methodCode += "PUSHIMM " + t.getInt() + "\n";
+					methodCode += getExpression(s);
 				} else {
 					methodCode += "PUSHIMM 0\n";
 				}
 
-				s.add(varID, offset);
+				s.put(varID, Integer.valueOf(offset));
 				offset += 1;
 
 				if (!t.check(','))
@@ -124,7 +140,7 @@ public class BaliCompiler {
 	}
 	
 	// return the number of formals (to determine the return value's FBR offset)
-	private int parseFormals(BaliSymbolTable s) {
+	private int parseFormals(HashMap<String, Integer> s) {
 		// first, store the formals in an array
 		ArrayList<String> formals = new ArrayList<String>(4);
 
@@ -147,8 +163,14 @@ public class BaliCompiler {
 		// now, remember their FBR offsets in the symbol table
 		int numFormals = formals.size();
 		int i = 0;
+		String currFormalID;
 		while (i < numFormals) {
-			s.add(formals.get(i), -numFormals + i);
+			currFormalID = formals.get(i);
+			if (s.get(currFormalID) != null) {
+				throw new Error("Error parsing formals on line " + t.lineNo() + ": duplicate parameter name `" + currFormalID + "`");
+			}
+			
+			s.put(formals.get(i), Integer.valueOf(-numFormals + i));
 			i += 1;
 		}
 
@@ -158,12 +180,12 @@ public class BaliCompiler {
 	// returns the SaM code for the Bali statements parsed
 	// breakLabel is the label for where a `break` should jump to; null means a
 	// `break` statement is not expected
-	private String getStatements(BaliSymbolTable s, String endLabel, String breakLabel) {
+	private String getStatements(HashMap<String, Integer> s, String endLabel, String breakLabel) {
 		String statementsCode = "";
 
 		while (true) {
 			if (t.peekAtKind() == TokenType.EOF) {
-				throw new Error("EOF encountered while parsing statements on line " + t.lineNo());
+				throw new Error("EOF encountered while parsing statements on line " + t.nextLineNo());
 			}
 			if (t.test('}')) break;
 
@@ -174,11 +196,12 @@ public class BaliCompiler {
 	}
 
 	// return the SaM code for the Bali statement parsed
-	private String getStatement(BaliSymbolTable s, String endLabel, String breakLabel) {
+	private String getStatement(HashMap<String, Integer> s, String endLabel, String breakLabel) {
 		String statementCode = "";
 		switch (t.peekAtKind()) {
 			case OPERATOR:
-				switch (t.getOp()) {
+				char operator = t.getOp();
+				switch (operator) {
 					// `BLOCK` case
 					case '{':
 						statementCode += getStatements(s, endLabel, breakLabel);
@@ -188,7 +211,7 @@ public class BaliCompiler {
 						break;
 					default:
 						throw new Error(
-								"Error parsing a statement on line " + t.lineNo() + " (expecting either a `{` or a `;`)");
+								"Error parsing a statement on line " + t.lineNo() + "; expecting either a `{` or a `;` but found `" + operator + "` instead");
 				}
 				break;
 			case WORD:
@@ -197,7 +220,8 @@ public class BaliCompiler {
 					case "return":
 						// evaluate the expression
 						statementCode += getExpression(s);
-						
+						assertAndConsume(';');
+
 						// go to the end of the method
 						statementCode += "JUMP " + endLabel + '\n';
 						break;
@@ -219,6 +243,7 @@ public class BaliCompiler {
 						int assigneeFBROffset = getFBROffset(s, word);
 						assertAndConsume('=');
 						statementCode += getExpression(s);
+						assertAndConsume(';');
 						statementCode += "STOREOFF " + assigneeFBROffset + '\n';
 						break;
 				}
@@ -232,7 +257,7 @@ public class BaliCompiler {
 	}
 	
 	// called after having already consumed `if`; returns the SaM code
-	private String parseIfStatement(BaliSymbolTable s, String endLabel, String breakLabel) {
+	private String parseIfStatement(HashMap<String, Integer> s, String endLabel, String breakLabel) {
 		String ifStatement = "";
 
 		// first, generate the labels and parse the Bali code
@@ -258,7 +283,7 @@ public class BaliCompiler {
 	}
 	
 	// called after having already consumed `while`; returns the SaM code
-	private String parseWhileStatement(BaliSymbolTable s, String endLabel) {
+	private String parseWhileStatement(HashMap<String, Integer> s, String endLabel) {
 		String whileStatement = "";
 
 		// first, generate the labels and parse the Bali code
@@ -281,7 +306,7 @@ public class BaliCompiler {
 		return whileStatement;
 	}
 
-	private String getExpression(BaliSymbolTable s) {
+	private String getExpression(HashMap<String, Integer> s) {
 		switch (t.peekAtKind()) {
 			case INTEGER:
 				return "PUSHIMM " + t.getInt() + "\n";
@@ -302,27 +327,18 @@ public class BaliCompiler {
 						}
 				}
 			case OPERATOR:
-				String expressionCode = "";
+				String expressionCode;
 				assertAndConsume('(');
-				char operator;
 
-				if (t.peekAtKind() == TokenType.OPERATOR) {
-					// unary operation
-					operator = t.getOp();
-					switch (operator) {
-						case '-':
-							expressionCode = getExpression(s) + "PUSHIMM -1\nTIMES\n";
-							break;
-						case '!':
-							expressionCode = getExpression(s) + "NOT\n";
-							break;
-						default:
-							throw new Error("Error parsing expression; unexpected operator `" + operator + "` on line " + t.lineNo());
-					}
+				// if the next token isn't `-` or `!`, it must be another expression
+				if (t.check('-')) {
+					expressionCode = getExpression(s) + "PUSHIMM -1\nTIMES\n";
+				} else if (t.check('!')) {
+					expressionCode = getExpression(s) + "NOT\n";
 				} else {
-					// binary operation, or "just an expression"
 					expressionCode = getExpression(s);
-					operator = t.getOp();
+					// and the next token must be an operator
+					char operator = t.getOp();
 					switch (operator) {
 						case '+':
 							expressionCode += getExpression(s) + "ADD\n";
@@ -355,18 +371,18 @@ public class BaliCompiler {
 							// already consumed the right paren, so just return
 							return expressionCode;
 						default:
-							throw new Error("Error parsing expression; unexpected operator `" + operator + "` on line " + t.lineNo());
+							throw new Error("Error parsing expression; found unexpected operator `" + operator + "` on line " + t.lineNo());
 					}
 				}
 				assertAndConsume(')');
 				return expressionCode;
 			default:
-				throw new Error("Error parsing expression; unexpected token on line " + t.lineNo());
+				throw new Error("Error parsing expression; unexpected token on line " + t.nextLineNo());
 		}
 	}
 	
 	// called after having already consumed the left parenthesis; returns SaM
-	private String getMethodCall(BaliSymbolTable s, String methodID) {
+	private String getMethodCall(HashMap<String, Integer> s, String methodID) {
 		String methodCallCode = "PUSHIMM 0\n"; // slot for return value
 		int numParameters = 0;
 		MethodInfo currMethodInfo = methodInfos.get(methodID);
@@ -382,7 +398,7 @@ public class BaliCompiler {
 
 		while (true) {
 			if (t.peekAtKind() == TokenType.EOF) {
-				throw new Error("EOF encountered while parsing actuals of a method on " + t.lineNo());
+				throw new Error("EOF encountered while parsing actuals of a method on " + t.nextLineNo());
 			}
 			if (t.test(')')) break;
 
@@ -415,13 +431,13 @@ public class BaliCompiler {
 	private void assertAndConsume(String word) {
 		if (!t.check(word))
 			// TODO: print the unexpected token
-			throw new Error("Expected token " + word + " on line " + t.lineNo());
+			throw new Error("Expected token `" + word + "` on line " + t.nextLineNo());
 	}
 
 	private void assertAndConsume(char c) {
 		if (!t.check(c))
 			// TODO: print the unexpected token
-			throw new Error("Expected token " + c + " on line " + t.lineNo());
+			throw new Error("Expected token `" + c + "` on line " + t.nextLineNo());
 	}
 
 	// we make every label unique by appending a unique suffix to each
@@ -431,12 +447,12 @@ public class BaliCompiler {
 	}
 
 	// get the FBR offset for a symbol; throws error if not found
-	private int getFBROffset(BaliSymbolTable s, String symbol) {
-		int FBROffset = s.resolveAddress(symbol);
-		if (FBROffset == 0) {
+	private int getFBROffset(HashMap<String, Integer> s, String symbol) {
+		Integer FBROffset = s.get(symbol);
+		if (FBROffset == null) {
 			throw new Error("Error parsing location reference; " + symbol + " is not a valid variable, found on line " + t.lineNo());
 		}
-		return FBROffset;
+		return FBROffset.intValue();
 	}
 }
 
