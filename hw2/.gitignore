@@ -1,4 +1,5 @@
 untracked/
-./*.jar
+!/lib/SaM-2.6.2.jar
+*.jar
 *.class
 *.asm
