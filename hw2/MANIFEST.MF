@@ -1,0 +1,2 @@
+Main-Class: balix86compiler.CompilerDriver
+Class-Path: lib/SaM-2.6.2.jar

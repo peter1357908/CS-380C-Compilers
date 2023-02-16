@@ -1,3 +1,4 @@
+package balix86compiler;
 import edu.cornell.cs.sam.io.SamTokenizer;
 import edu.cornell.cs.sam.io.Tokenizer.TokenType;
 
@@ -11,7 +12,7 @@ import java.util.ArrayList;
 // in README.md
 
 // BaliCompiler parses directly, without creating an AST
-public class BaliX86Compiler {
+public class Compiler {
 	private SamTokenizer t;
 	// `labelCount` is used by `generateLabel()` to generate
 	// unique X86 labels
