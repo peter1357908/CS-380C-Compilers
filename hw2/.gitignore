@@ -1,0 +1,4 @@
+untracked/
+./*.jar
+/bin
+*.sam
