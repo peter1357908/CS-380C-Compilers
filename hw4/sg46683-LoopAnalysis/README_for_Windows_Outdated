@@ -1,0 +1,76 @@
+# NOTE
+
+This document is kept simply because I spent too much time on it (as in, writing it and implementing the content). MSYS2 doesn't work for this assignment -- LLVM doesn't properly support Loadable Modules on Windows so using MSYS2 means I cannot easily build or test the pass I write.
+
+## preparations (for Windows)
+Install [MSYS2](https://www.msys2.org/). Switch to using `MSYS2 MINGW64` (NOT `MSYS2 UCRT64`) and install `gcc`, `make`, and `cmake`, with `pacman` in `MSYS2 MINGW64`. Note that they MUST be versions specific to `mingw-w64` (use commands below)!!
+
+```
+pacman -S mingw-w64-x86_64-gcc
+pacman -S mingw-w64-x86_64-make
+pacman -S mingw-w64-x86_64-cmake
+```
+
+We could try installing the generic `make`; here for `mingw-w64-x86_64-make` we also need to [manually create a symbolic link](https://stackoverflow.com/a/70169098).
+
+Then we need to get version 11.0.0 of LLVM, e.g., from [their GitHub release](https://github.com/llvm/llvm-project/releases/tag/llvmorg-11.0.0). Put the LLVM source files somewhere visible to `MSYS2`.
+
+Finally, we need to fix an issue with the 11.0.0 version of LLVM by adding `#include <limits>` to the file `llvm/utils/benchmark/src/benchmark_register.h` (see [here](https://reviews.llvm.org/D89450))
+
+## building
+In the LLVM project root:
+
+```
+mkdir build
+
+cd build
+
+cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release ../llvm
+
+make -j2
+
+make install
+```
+
+(the option `-DBUILD_SHARED_LIBS=On`  to `cmake` is essential for enabling using Loadable Modules on MSYS2... or so it seemed. MSYS2 just doesn't work...)
+
+(add option `-DLLVM_ENABLE_PROJECTS="clang"` to `cmake` if we want to compile `clang` from the 11.0.0 distribution as well) 
+
+(the `-j2` flag enables parallelization; try without it if it causes errors)
+
+The default include path should be `/llvm-project-llvmorg-11.0.0/llvm/include` (e.g., you want to specify this for IntelliSense when using VSCode so it can find the included files). Note that we also built the `clang` that came with the 11.0.0 version of LLVM; we should use that for testing (on Windows, the installed binaries are in `C:\Program Files (x86)\LLVM\bin` by default).
+
+## Removing built LLVM:
+In the `build` directory (we made it in the LLVM project root):
+```
+xargs rm -rf < install_manifest.txt
+```
+
+(TODO: check out `make clean`)
+## Installation References
+- [MSYS2 Package List](https://packages.msys2.org/package/)
+- [LLVM install reference (latest version)]https://llvm.org/docs/GettingStarted.html#getting-started-with-llvm
+- [LLVM 11.0.0 install reference](https://releases.llvm.org/11.0.0/docs/GettingStarted.html)
+
+## Programming References
+Guides and manuals:
+- [Writing an LLVM Pass (latest version)](https://llvm.org/docs/WritingAnLLVMPass.html)
+- [Writing an LLVM Pass 11.0.0](https://releases.llvm.org/11.0.0/docs/WritingAnLLVMPass.html)
+- [LLVM Loop Terminology (latest version)](https://llvm.org/docs/LoopTerminology.html) (noticeably more clear, with graphics, compared with the 11.0.0 version)
+- [LLVM Loop Terminology 11.0.0](https://releases.llvm.org/11.0.0/docs/LoopTerminology.html#loop-terminology)
+- [LLVM Progammer Manual](https://llvm.org/docs/ProgrammersManual.html)
+
+Specific Q&A
+- [Get Function Name Inside a Loop Pass](https://stackoverflow.com/a/71043976)
+- [What should be considered branch instructions for this assignment](https://piazza.com/class/lcpazfsuorcqg/post/89_f1)
+- [Meaning of & in function parameter in C++ (pass by reference)](https://qr.ae/prViPx)
+
+## Notes to self:
+- Use `pacman -Rns` to recursively remove a package and its dependencies.
+- Use `pacman -Rns $(pacman -Qdtq)` to remove orphaned packages.
+
+- Use `cmake --fresh` to re-configure `cmake` for a project (e.g., to change the flags for building the project).
+
+## Comments and Questions
+Why is our pass (and the `Hello` example) in the `Transforms` directory? It doesn't do any transformation.
+

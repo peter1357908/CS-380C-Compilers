@@ -1,0 +1,100 @@
+## preparations (for WSL)
+Install `WSL2` and install `build essentials`, `make`, and `cmake`:
+
+(note that although LLVM recommends building with `ninja`, it didn't work with my setup, so we'll just build with `make`)
+
+```
+sudo apt update && sudo apt upgrade -y
+sudo apt autoremove -y
+sudo apt install build-essential
+sudo apt install make cmake
+```
+
+Then we need to get version 11.0.0 of LLVM, e.g., from [their GitHub release](https://github.com/llvm/llvm-project/releases/tag/llvmorg-11.0.0).
+
+Finally, we need to fix an issue with the 11.0.0 version of LLVM by adding `#include <limits>` to the file `llvm/utils/benchmark/src/benchmark_register.h` (see [here](https://reviews.llvm.org/D89450))
+
+## building
+In the LLVM project root:
+
+```
+cmake -G "Unix Makefiles" -B build -S llvm -DLLVM_ENABLE_PROJECTS=clang -DCMAKE_BUILD_TYPE=Release
+
+cd build
+
+make -j2
+
+make install
+```
+
+### Notes about this build
+- We installed `clang` from the same release, for consistency (rather than using an old `LLVM` with a new `clang`).
+
+- if we want, we can install `lld` linker and use the `cmake` option `-DLLVM_USE_LINKER=lld` to speed up the build. `lld` is actually part of LLVM.
+
+- The default install location is `/usr/local/bin/`; remember to switch to using those binaries if we already have other versionse of `llvm` and `clang`.
+
+- The include path in the source directory is `/llvm-project-llvmorg-11.0.0/llvm/include`. Alternatively, we can include the installed LLVM instead.
+
+### Removing installed LLVM:
+In the `build` directory (in the LLVM source root from above):
+```
+xargs rm -rf < install_manifest.txt
+```
+(`make clean` only cleans the build)
+
+## testing
+
+Write test files in `c`, and compile to LLVM bitcode file (make sure to use the `clang` we built):
+
+```
+clang -O0 -emit-llvm test_comprehensive.c -c
+```
+
+(note that to allow easier testing, we want clang to not optimize at all)
+
+Then load and test the module (output will be in the file `output.txt`):
+
+```
+opt -load ./sg46683-LoopAnalysis.so -sg46683-loop-props <test_comprehensive.bc >/dev/null 2>output.txt
+```
+
+Finally, to help verify that the answers are correct, we can let `llvm` produce CFGs of the test functions, and view them with the appropriate tools.
+
+First, install `graphviz`:
+
+```
+sudo apt install graphviz
+```
+
+Then, produce the `dot` graphs with `-dot-cfg` (the `-view-cfg` *should* directly open the produced graphs for view, but on my set-up the output graphs have no text, so here we use `-dot-cfg` to produce the graphs and view them somewhere else)
+
+```
+opt -dot-cfg test_comprehensive.bc
+```
+
+One way to view the graphs is by rendering them online [here](http://www.webgraphviz.com/).
+
+Included sample tests: `test_basic_nested_loops.c` and `test_comprehensive.c`.
+
+## Installation References
+- [MSYS2 Package List](https://packages.msys2.org/package/)
+- [LLVM install reference (latest version)](https://llvm.org/docs/GettingStarted.html#getting-started-with-llvm)
+- [LLVM 11.0.0 install reference](https://releases.llvm.org/11.0.0/docs/GettingStarted.html)
+
+## Programming References
+### Guides and manuals:
+- [Writing an LLVM Pass (latest version)](https://llvm.org/docs/WritingAnLLVMPass.html)
+- [Writing an LLVM Pass 11.0.0](https://releases.llvm.org/11.0.0/docs/WritingAnLLVMPass.html)
+- [LLVM Loop Terminology (latest version)](https://llvm.org/docs/LoopTerminology.html) (noticeably more clear, with graphics, compared with the 11.0.0 version)
+- [LLVM Loop Terminology 11.0.0](https://releases.llvm.org/11.0.0/docs/LoopTerminology.html#loop-terminology)
+- [LLVM Progammer Manual](https://llvm.org/docs/ProgrammersManual.html)
+
+### Specific Q&A
+- [Get Function Name Inside a Loop Pass](https://stackoverflow.com/a/71043976)
+- [What should be considered branch instructions for this assignment](https://piazza.com/class/lcpazfsuorcqg/post/89_f1)
+- [Meaning of & in function parameter in C++ (pass by reference)](https://qr.ae/prViPx)
+
+## Comments and Questions
+Why is our pass (and the `Hello` example) in the `Transforms` directory? It doesn't do any transformation.
+
