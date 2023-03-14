@@ -1,0 +1,1 @@
+The files `CMakeLists.txt` and `sg46683-LoopAnalysis` should be directly placed into the `\llvm-project-11.0.0\llvm\lib\Transforms` directory.
